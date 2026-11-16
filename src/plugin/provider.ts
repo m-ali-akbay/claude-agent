@@ -29,6 +29,14 @@ const Catalog = Schema.Struct({
 type Catalog = typeof Catalog.Type
 const CATALOG_KEY = "models"
 
+// Claude Code's own aliases, which every subscription accepts. An account with a token lists them until its first
+// check reports the full list, so a newly added account has models to pick at once.
+const STARTER: readonly CatalogModel[] = [
+  { id: "opus", name: "Opus", efforts: [] },
+  { id: "sonnet", name: "Sonnet", efforts: [] },
+  { id: "haiku", name: "Haiku", efforts: [] },
+]
+
 // Mantle is Bedrock serving Anthropic's API, and opencode drops most of its `anthropic.…` IDs from Bedrock's list,
 // so it uses Anthropic's prices.
 const PRICE_SOURCES: Partial<Record<NonNullable<AccountInfo["apiProvider"]>, Provider.ID>> = {
@@ -54,6 +62,8 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
   // A chat's startup report lists models without measuring their context windows, so a model that is new to the
   // list falls back to the default limit until the full check measures it. A check that changes nothing ends the loop.
   const unmeasured = (models: readonly CatalogModel[]) => models.some((model) => model.contextWindow === undefined)
+  const listed = () =>
+    current.catalog.models.length === 0 && instance.token() !== undefined ? STARTER : current.catalog.models
 
   yield* ctx.provider.transform((editor) => {
     const source = current.catalog.priceSource
@@ -66,7 +76,7 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
         activation: instance.token() ? "enabled" : "auto",
         package: `aisdk:${SdkPlaceholder.url}`,
       },
-      models: current.catalog.models.map((model) => toModel(ID, model, prices)),
+      models: listed().map((model) => toModel(ID, model, prices)),
     })
   })
 

@@ -141,7 +141,9 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
           id: Provider.ID.make(id),
           name: `Claude · ${label || id.replace(/^claude-/, "")}`,
           token: () => holder.token,
-          storagePrefix: `${id}/`,
+          // Keyed by the credential, so a renamed account keeps its sessions and model list, and a new account never
+          // picks up data left by an earlier account of the same name.
+          storagePrefix: `account/${connection.id}/`,
           source: "connected",
         },
       }

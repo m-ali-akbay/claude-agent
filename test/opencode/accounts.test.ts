@@ -155,3 +155,20 @@ describe("Claude accounts added from the UI", () => {
     }),
   )
 })
+
+describe("a new Claude account", () => {
+  it.live("lists Claude Code's model aliases before its first check finishes", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([])
+      // No `claude` to run, so the account's own check never reports a model list
+      const io = { ...FakeIO.make({ claude }), which: () => undefined }
+      const test = yield* TestOpenCode.start({
+        io,
+        options: { accounts: { "claude-new": { token: "sk-ant-oat01-new" }, "claude-nologin": {} } },
+      })
+      expect(yield* providerModels(test.opencode, "claude-new")).toEqual(["opus", "sonnet", "haiku"])
+      // An account without a token waits for its login, as upstream does
+      expect(yield* providerModels(test.opencode, "claude-nologin")).toEqual([])
+    }),
+  )
+})
