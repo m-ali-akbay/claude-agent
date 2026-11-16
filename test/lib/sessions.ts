@@ -50,8 +50,10 @@ export const model = (sessions: ClaudeSessions.Interface, settings?: Record<stri
   build((request) => sessions.run(request), settings)
 
 export const rotating = (accounts: ClaudeAccounts.Interface, settings?: Record<string, unknown>) => {
-  const configDirs = ClaudeQueryOptions.configDirs(settings?.configDir)
-  return build((request) => accounts.run(request, configDirs), settings)
+  // `members` stands in for a pool of OAuth-token accounts
+  const members =
+    (settings?.members as ClaudeAccounts.Members | undefined) ?? ClaudeQueryOptions.configDirs(settings?.configDir)
+  return build((request) => accounts.run(request, members), settings)
 }
 
 const build = Effect.fn(function* (

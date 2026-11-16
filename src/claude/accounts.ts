@@ -10,8 +10,24 @@ export interface Storage {
   readonly set: (key: string, value: string) => Effect.Effect<void>
 }
 
+/**
+ * One account to rotate through: a Claude Code config folder, or an OAuth token. `key` identifies it in storage and
+ * in the limit cooldown, so it must stay the same for the same account (a folder path, a credential ID).
+ */
+export interface Member {
+  readonly key: string
+  readonly env: Readonly<Record<string, string>>
+}
+
+// A plain string is a config folder, as upstream's `configDir` list.
+export type Members = readonly (string | Member)[]
+
 export interface Interface {
-  readonly run: (request: ClaudeSessions.Request, configDirs: readonly string[]) => Effect.Effect<void, Error>
+  readonly run: (request: ClaudeSessions.Request, members: Members) => Effect.Effect<void, Error>
+}
+
+function member(item: string | Member): Member {
+  return typeof item === "string" ? { key: item, env: { CLAUDE_CONFIG_DIR: item } } : item
 }
 
 const LAST = "last-account"
@@ -46,27 +62,26 @@ export function make(input: { readonly sessions: ClaudeSessions.Interface; reado
     return Option.getOrUndefined(Schema.decodeUnknownOption(Schema.String)(yield* input.storage.get(key)))
   })
 
-  const run = Effect.fn("ClaudeAccounts.run")(function* (
-    request: ClaudeSessions.Request,
-    configDirs: readonly string[],
-  ) {
+  const run = Effect.fn("ClaudeAccounts.run")(function* (request: ClaudeSessions.Request, list: Members) {
     const connection = request.connection
+    const members = list.map(member)
+    const byKey = new Map(members.map((item) => [item.key, item]))
+    const keys = members.map((item) => item.key)
     // An API key or token (OAuth included) logs in the same way whatever the folder, so those requests never rotate.
-    if (
-      configDirs.length < 2 ||
-      connection?.ANTHROPIC_API_KEY ||
-      connection?.ANTHROPIC_AUTH_TOKEN ||
-      connection?.CLAUDE_CODE_OAUTH_TOKEN
-    ) {
+    if (connection?.ANTHROPIC_API_KEY || connection?.ANTHROPIC_AUTH_TOKEN || connection?.CLAUDE_CODE_OAUTH_TOKEN) {
       return yield* input.sessions.run(request)
+    }
+    if (members.length < 2) {
+      const only = members[0]
+      return yield* input.sessions.run(only ? { ...request, connection: { ...connection, ...only.env } } : request)
     }
     const own = request.sessionID ? yield* read(`accounts/${request.sessionID}`) : undefined
     const last = yield* read(LAST)
     // Side calls and new forks start on their parent chat's account, which has its transcript and prompt cache.
     const parent = !own && request.sourceID ? yield* read(`accounts/${request.sourceID}`) : undefined
     const from = own ?? parent ?? last
-    const start = from ? Math.max(0, configDirs.indexOf(from)) : 0
-    const order = [...configDirs.slice(start), ...configDirs.slice(0, start)]
+    const start = from ? Math.max(0, keys.indexOf(from)) : 0
+    const order = [...keys.slice(start), ...keys.slice(0, start)]
     const dirs = order.filter((dir) => until(dir, request.model) === undefined)
     if (dirs.length === 0) {
       const next = Math.min(...order.map((dir) => until(dir, request.model)!))
@@ -81,7 +96,7 @@ export function make(input: { readonly sessions: ClaudeSessions.Interface; reado
       const attempt = watch(request.emit)
       yield* input.sessions.run({
         ...request,
-        connection: { ...connection, CLAUDE_CONFIG_DIR: dir },
+        connection: { ...connection, ...byKey.get(dir)!.env },
         emit: attempt.emit,
       })
       const error = attempt.error()

@@ -52,6 +52,7 @@ export const make = (io: ClaudeIO.Interface, registry?: ClaudeSessions.Registry 
           ctx,
           reserved: new Set(instances.map((instance) => String(instance.id))),
           start: (instance) => setup(ctx, instance, io, registries.get(instance.id)),
+          pool: ctx.options?.pool !== false,
         })
       }
     }),
@@ -76,8 +77,10 @@ const setup = Effect.fn("ClaudeMulti.setup")(function* (
       Effect.forkScoped({ startImmediately: true }),
     )
   yield* ClaudeProvider.register(ctx, instance, status, io)
-  // A UI account's login lives in its "Claude Account" credential, so it gets no integration of its own.
-  if (instance.source !== "connected") yield* ClaudeIntegration.register(ctx, instance, status)
+  // UI accounts and the pool log in with Claude Account credentials, so they get no integration of their own.
+  if (instance.source === "default" || instance.source === "options") {
+    yield* ClaudeIntegration.register(ctx, instance, status)
+  }
   yield* ClaudeAISDK.register(ctx, instance, sessions)
   yield* ClaudeSessionHooks.register(ctx, instance)
   yield* ClaudeInstructions.register(ctx, instance)

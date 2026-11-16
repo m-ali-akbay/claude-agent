@@ -63,7 +63,23 @@ token → **rename**). The provider follows the new name while OpenCode runs; re
 Chats started under the old name keep their history, but a new model pick is needed since the provider ID changed.
 A name already used by an `accounts` entry gets a short suffix.
 
-To hide the Claude Account provider, set `"connected": false` in the plugin's options.
+### Switch accounts automatically at a usage limit
+
+With two or more accounts added from the UI, the plugin also lists **Claude · Pool (auto-switch)** (`claude-pool`),
+which uses all of them:
+
+- A new chat starts on the first account by name. When an account hits a usage limit before showing any output, the
+  request is retried on the next account without an error, and the chat stays on the account that answered.
+- An account at its limit is skipped until the limit resets; a weekly Opus or Sonnet limit only skips it for that model
+  family. When every account is at its limit, the request fails at once with the earliest reset time.
+- A chat that moves keeps its history: every account shares the same Claude Code transcripts.
+- A limit hit after Claude has started answering is shown as an error, so the reply isn't repeated; the next message
+  moves to another account.
+
+Pick `claude-pool/opus`, `claude-pool/sonnet`, … in `/models`. The single accounts stay available as before. To turn
+the pool off, set `"pool": false` in the plugin's options.
+
+To hide the Claude Account provider (and the pool), set `"connected": false` in the plugin's options.
 
 ## Account options (opencode.json)
 
@@ -103,5 +119,5 @@ bun test test/opencode test/claude test/sync test/tools test/language-model
 checks the UI flow against the real `claude` with an isolated database:
 
 ```sh
-CLAUDE_TOKEN_FILE=~/.config/opencode/claude-accounts/work bun test/live/ui-account.live.ts "$(mktemp -d)"
+CLAUDE_TOKEN_FILES=~/tokens/work,~/tokens/home bun test/live/ui-account.live.ts "$(mktemp -d)"
 ```

@@ -172,3 +172,51 @@ describe("a new Claude account", () => {
     }),
   )
 })
+
+describe("the Claude pool", () => {
+  it.live("joins the UI accounts once there are two, starting new chats on the first by name", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make(
+        [FakeClaude.expectStartup(), FakeClaude.expectTurn(), FakeClaude.expectInterrupt()],
+        { probes: true },
+      )
+      const test = yield* TestOpenCode.start({ io: FakeIO.make({ claude }), options: { accounts: {} } })
+      const ids = () => test.opencode.provider.list().pipe(Effect.map((list) => list.data.map((p) => String(p.id))))
+      const connect = (key: string, name: string) =>
+        test.opencode.integration.connect.key({
+          integrationID: Integration.ID.make("claude-account"),
+          key,
+          answer: { name },
+        })
+
+      yield* connect("sk-ant-oat01-beta", "Beta")
+      yield* TestOpenCode.waitUntil(
+        providerModels(test.opencode, "claude-beta"),
+        (m) => m.includes("haiku"),
+        "30 seconds",
+      )
+      // One account is no pool
+      expect(yield* ids()).not.toContain("claude-pool")
+      expect(yield* providerModels(test.opencode, "claude-pool")).toEqual([])
+
+      yield* connect("sk-ant-oat01-alpha", "Alpha")
+      yield* TestOpenCode.waitUntil(
+        providerModels(test.opencode, "claude-pool"),
+        (m) => m.includes("haiku"),
+        "30 seconds",
+      )
+      const providers = yield* test.opencode.provider.list()
+      expect(providers.data.find((p) => String(p.id) === "claude-pool")?.name).toBe("Claude · Pool (auto-switch)")
+
+      const before = claude.runs.length
+      const result = yield* test.opencode.generate.text({
+        prompt: "hello",
+        model: Model.Ref.make({ providerID: Provider.ID.make("claude-pool"), id: Model.ID.make("haiku") }),
+      })
+      expect(result.text).toBe("COPPER-OTTER")
+      const chat = claude.runs.slice(before).find((run) => run.args.includes("--include-partial-messages"))!.env
+      expect(chat.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat01-alpha")
+      claude.check()
+    }),
+  )
+})

@@ -6,6 +6,7 @@ import { Effect } from "effect"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import type { ClaudeAccounts } from "../claude/accounts.js"
 import type { ClaudeIO } from "../claude/io.js"
 
 // Provider IDs this plugin registers when it is given no accounts, matching the bundled plugin.
@@ -30,7 +31,12 @@ export interface Instance {
   /** Prefix for this instance's plugin storage keys. Empty for the default instance, so it keeps upstream's data. */
   readonly storagePrefix: string
   /** Where the account comes from: the bundled default, the plugin's options, or a token saved in the UI */
-  readonly source: "default" | "options" | "connected"
+  readonly source: "default" | "options" | "connected" | "pool"
+  /**
+   * The accounts a pool rotates through. Each request starts on its chat's account and moves to the next when one
+   * hits a usage limit. `token` then returns the first member's, for the login check and the model list.
+   */
+  readonly members?: () => readonly ClaudeAccounts.Member[]
 }
 
 export interface AccountOptions {
@@ -124,6 +130,8 @@ function tokenReader(account: AccountOptions, io: ClaudeIO.Interface): () => str
 /** The environment an instance adds to every `claude` process it starts. */
 export function env(instance: Instance): Record<string, string> {
   const result: Record<string, string> = {}
+  // A pool's token is chosen per request
+  if (instance.members) return result
   const token = instance.token()
   if (token) result.CLAUDE_CODE_OAUTH_TOKEN = token
   if (instance.configDir) result.CLAUDE_CONFIG_DIR = instance.configDir

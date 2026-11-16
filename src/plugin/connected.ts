@@ -16,6 +16,8 @@ import type { ClaudeInstance } from "./instance.js"
  */
 export const HUB_ID = "claude-account"
 export const HUB_NAME = "Claude Account"
+export const POOL_ID = "claude-pool"
+export const POOL_NAME = "Claude · Pool (auto-switch)"
 export const METHOD_LABEL = "Claude Code OAuth token (claude setup-token)"
 export const NAME_FIELD = "name"
 
@@ -45,6 +47,8 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
   /** Provider IDs already taken by accounts from opencode.json */
   readonly reserved: ReadonlySet<string>
   readonly start: Start
+  /** Also register `claude-pool`, which moves a request to the next account when one hits a usage limit */
+  readonly pool?: boolean
 }) {
   const { ctx } = input
   const integrationID = Integration.ID.make(HUB_ID)
@@ -129,7 +133,11 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
         yield* stop(current)
         changed = true
       }
-      const taken = new Set([...input.reserved, ...[...running.values()].map((entry) => String(entry.instance.id))])
+      const taken = new Set([
+        ...input.reserved,
+        POOL_ID,
+        ...[...running.values()].map((entry) => String(entry.instance.id)),
+      ])
       const id = providerID(label, connection.id, taken)
       const holder = { token: value }
       const entry: Running = {
@@ -172,6 +180,26 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
   )
   yield* reconcile().pipe(Effect.catchCause((cause) => Effect.logWarning("Claude Account load failed", { cause })))
 
+  if (input.pool !== false) {
+    // Accounts in name order, so the pool starts new chats on the same account every time
+    const members = () =>
+      [...running.values()]
+        .sort((a, b) => a.label.localeCompare(b.label) || a.credentialID.localeCompare(b.credentialID))
+        .map((entry) => ({ key: entry.credentialID, env: { CLAUDE_CODE_OAUTH_TOKEN: entry.holder.token } }))
+    yield* input.start({
+      id: Provider.ID.make(POOL_ID),
+      name: POOL_NAME,
+      // A pool of one is the account itself, so the pool lists models only from two accounts on.
+      token: () => {
+        const list = members()
+        return list.length >= 2 ? list[0]!.env.CLAUDE_CODE_OAUTH_TOKEN : undefined
+      },
+      storagePrefix: "pool/",
+      source: "pool",
+      members,
+    })
+  }
+
   return { running } as const
 })
 
@@ -206,7 +234,7 @@ export function providerID(label: string, credentialID: string, taken: ReadonlyS
   const base = slug(label)
   const tail = slug(credentialID).slice(-6) || "account"
   const first = base ? `claude-${base}` : `claude-${tail}`
-  if (!taken.has(first) && first !== HUB_ID) return first
+  if (!taken.has(first) && first !== HUB_ID && first !== POOL_ID) return first
   const second = `${first}-${tail}`
   if (!taken.has(second)) return second
   for (let i = 2; ; i++) if (!taken.has(`${second}-${i}`)) return `${second}-${i}`

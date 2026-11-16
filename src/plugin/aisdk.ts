@@ -33,7 +33,7 @@ export const register = Effect.fn("ClaudeAISDK.register")(function* (
         const fast = evt.options.fast === true
         const configDirs = ClaudeQueryOptions.configDirs(evt.options.configDir)
         const dependencies: ClaudeAgentLanguageModel.Dependencies = {
-          run: (request, signal) => run(accounts.run(request, configDirs), { signal }),
+          run: (request, signal) => run(accounts.run(request, instance.members?.() ?? configDirs), { signal }),
         }
         // Always replace: until the opencode fix ships, the npm fallback has already set the placeholder here
         evt.sdk = {

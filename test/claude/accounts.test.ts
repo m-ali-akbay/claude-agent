@@ -91,6 +91,38 @@ describe("Claude accounts", () => {
     }),
   )
 
+  it.effect("a pool of OAuth tokens rotates the same way, keeping the chat's Claude session", () =>
+    Effect.gen(function* () {
+      const claude = FakeClaude.make([
+        FakeClaude.expectStartup(),
+        limitTurn(),
+        FakeClaude.expectInterrupt(),
+        FakeClaude.expectStartup(),
+        FakeClaude.expectTurn(),
+        FakeClaude.expectTurn({ index: 1 }),
+        FakeClaude.expectInterrupt(),
+      ])
+      const tokens = {
+        members: [
+          { key: "cred-a", env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-a" } },
+          { key: "cred-b", env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-b" } },
+        ],
+      }
+      const test = yield* TestSessions.start(claude, TestSessions.storage(), tokens)
+      const one = yield* TestSessions.reply(test.model, first)
+      expect(TestSessions.text(one)).toBe("COPPER-OTTER")
+      expect(one.some((part) => part.type === "error")).toBe(false)
+      const two = yield* TestSessions.reply(test.model, TestSessions.followup())
+      expect(TestSessions.text(two)).toBe("COPPER-OTTER")
+      expect(claude.runs.map((run) => run.env.CLAUDE_CODE_OAUTH_TOKEN)).toEqual(["sk-ant-oat01-a", "sk-ant-oat01-b"])
+      // Every token shares one Claude config folder
+      expect(claude.runs.map((run) => run.env.CLAUDE_CONFIG_DIR)).toEqual([undefined, undefined])
+      expect(test.storage.data.get("accounts/session-a")).toBe("cred-b")
+      yield* test.registry.close()
+      claude.check()
+    }),
+  )
+
   it.effect("a new chat starts on the account that last worked", () =>
     Effect.gen(function* () {
       const claude = FakeClaude.make([

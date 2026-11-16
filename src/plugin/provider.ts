@@ -73,7 +73,8 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
         id: ID,
         name: instance.name,
         // An account with its own token needs no /connect, so it is listed as soon as the plugin loads.
-        activation: instance.token() ? "enabled" : "auto",
+        // A pool with fewer than two accounts stays out of the provider list altogether.
+        activation: instance.token() ? "enabled" : instance.source === "pool" ? "disabled" : "auto",
         package: `aisdk:${SdkPlaceholder.url}`,
       },
       models: listed().map((model) => toModel(ID, model, prices)),
@@ -112,7 +113,9 @@ export const connection = Effect.fn("ClaudeProvider.connection")(function* (
   ctx: Context,
   instance: ClaudeInstance.Instance,
 ) {
-  const own = ClaudeInstance.env(instance)
+  // A pool checks its login and lists models with its first account
+  const first = instance.members?.()[0]
+  const own = first ? { ...first.env } : ClaudeInstance.env(instance)
   const provider = yield* ctx.provider.get({ providerID: instance.id }).pipe(Effect.option)
   if (Option.isNone(provider)) return own
   const info = provider.value.data
