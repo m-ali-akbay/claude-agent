@@ -112,7 +112,7 @@ Without `accounts`, the plugin registers a single `claude-agent` provider and be
 ```sh
 bun install
 bun run typecheck
-bun test test/opencode test/claude test/sync test/tools test/language-model
+bun test test/plugin test/opencode test/claude test/sync test/tools test/language-model
 ```
 
 `test/opencode/accounts.test.ts` covers both kinds of accounts with a fake `claude`. `test/live/ui-account.live.ts`

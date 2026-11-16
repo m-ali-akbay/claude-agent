@@ -9,7 +9,13 @@ export type State =
   | { readonly type: "checking" }
   | { readonly type: "missing" }
   | { readonly type: "failed"; readonly message: string }
-  | { readonly type: "ready"; readonly probe: ClaudeProbe.Result; readonly configDir?: string }
+  | {
+      readonly type: "ready"
+      readonly probe: ClaudeProbe.Result
+      readonly configDir?: string
+      // From the full check, rather than a chat's startup report, which lists fewer models
+      readonly full?: boolean
+    }
 
 export interface Interface {
   readonly state: SubscriptionRef.SubscriptionRef<State>
@@ -31,7 +37,7 @@ export const make = Effect.fn("ClaudeStatus.make")(function* (
     if (!executable) return yield* SubscriptionRef.set(state, { type: "missing" })
     const env = yield* connection()
     const next = yield* ClaudeProbe.run(ClaudeQueryOptions.base({ executable, io, connection: env })).pipe(
-      Effect.map((probe): State => ({ type: "ready", probe, configDir: env.CLAUDE_CONFIG_DIR })),
+      Effect.map((probe): State => ({ type: "ready", probe, configDir: env.CLAUDE_CONFIG_DIR, full: true })),
       Effect.catch((error) =>
         Effect.logWarning("Claude Code login check failed", { cause: error.cause }).pipe(
           Effect.as<State>({

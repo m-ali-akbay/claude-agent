@@ -21,10 +21,12 @@ const CatalogModel = Schema.Struct({
   contextWindow: Schema.optionalKey(Schema.Number),
   resolvedModel: Schema.optionalKey(Schema.String),
 })
-type CatalogModel = typeof CatalogModel.Type
+export type CatalogModel = typeof CatalogModel.Type
 const Catalog = Schema.Struct({
   priceSource: Schema.optionalKey(Provider.ID),
   models: Schema.Array(CatalogModel),
+  // Whether a full check wrote the list. A list only chat reports wrote may be missing models, so it is checked again.
+  checked: Schema.optionalKey(Schema.Boolean),
 })
 type Catalog = typeof Catalog.Type
 const CATALOG_KEY = "models"
@@ -86,9 +88,11 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
       Effect.gen(function* () {
         if (state.type !== "ready") return
         const baseURL = (yield* connection(ctx, instance)).ANTHROPIC_BASE_URL ?? io.env().ANTHROPIC_BASE_URL
-        const next = {
+        const checked = state.full === true || current.catalog.checked === true
+        const next: Catalog = {
           priceSource: priceSource(state.probe.account, baseURL),
-          models: fromClaude(state.probe.models, current.catalog.models),
+          models: nextModels(state.probe.models, current.catalog.models, state.full === true),
+          ...(checked ? { checked } : {}),
         }
         if (JSON.stringify(next) === JSON.stringify(current.catalog)) return
         current.catalog = next
@@ -103,7 +107,8 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
   // Without a saved list there is no model to pick, so the first message that would fill it can never be sent.
   const empty = current.catalog.models.length === 0
   const usable = instance.token() !== undefined || (yield* ctx.integration.connection.active(ID)) !== undefined
-  if ((empty || unmeasured(current.catalog.models)) && usable) {
+  const unchecked = current.catalog.checked !== true
+  if ((empty || unchecked || unmeasured(current.catalog.models)) && usable) {
     yield* status.refresh().pipe(Effect.forkScoped)
   }
 })
@@ -124,6 +129,21 @@ export const connection = Effect.fn("ClaudeProvider.connection")(function* (
     ...ClaudeQueryOptions.connectionEnv({ settings: info.settings, headers: info.headers, body: info.body }),
   }
 })
+
+/**
+ * The model list after a report from Claude Code. Only the full check replaces it: a chat's startup report lists just
+ * Claude Code's aliases and the chat's own model, so it may only add models the list doesn't have yet.
+ */
+export function nextModels(
+  models: readonly ClaudeProbe.Model[],
+  saved: readonly CatalogModel[],
+  full: boolean,
+): CatalogModel[] {
+  const reported = fromClaude(models, saved)
+  if (full || saved.length === 0) return reported
+  const known = new Set(saved.map((model) => model.id))
+  return [...saved, ...reported.filter((model) => !known.has(model.id))]
+}
 
 // Context windows only come from the full check, so a chat's startup report keeps the saved ones.
 function fromClaude(models: readonly ClaudeProbe.Model[], saved: readonly CatalogModel[]): CatalogModel[] {
