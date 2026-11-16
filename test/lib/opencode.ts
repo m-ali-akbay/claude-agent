@@ -30,6 +30,8 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
   readonly before?: readonly Plugin[]
   readonly plugins?: readonly Plugin[]
   readonly config?: Record<string, unknown>
+  // The plugin entry's `options` from opencode.json
+  readonly options?: Record<string, unknown>
 }) {
   const directory = input.directory ?? (yield* tempDirectory)
   const opencode = yield* OpenCode.create({
@@ -37,12 +39,21 @@ export const start = Effect.fn("TestOpenCode.start")(function* (input: {
     config: { directory, project: false, content: JSON.stringify(input.config ?? {}) },
     models: { fetch: false },
     fs: { filewatcher: false },
-    plugins: [...(input.before ?? []), make(input.io, input.registry), ...(input.plugins ?? [])],
+    plugins: [
+      ...(input.before ?? []),
+      withOptions(make(input.io, input.registry), input.options),
+      ...(input.plugins ?? []),
+    ],
   })
   // Listing models waits for plugins to finish loading
   yield* opencode.model.list()
   return { opencode, directory }
 })
+
+function withOptions(plugin: Plugin, options: Record<string, unknown> | undefined): Plugin {
+  if (!options) return plugin
+  return { ...plugin, effect: (ctx) => plugin.effect({ ...ctx, options }) }
+}
 
 export const connect = Effect.fn("TestOpenCode.connect")(function* (opencode: Client) {
   yield* opencode.integration.connect.external({

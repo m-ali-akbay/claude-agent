@@ -51,8 +51,13 @@ export function make(input: { readonly sessions: ClaudeSessions.Interface; reado
     configDirs: readonly string[],
   ) {
     const connection = request.connection
-    // An API key or token logs in the same way whatever the folder, so those requests never rotate.
-    if (configDirs.length < 2 || connection?.ANTHROPIC_API_KEY || connection?.ANTHROPIC_AUTH_TOKEN) {
+    // An API key or token (OAuth included) logs in the same way whatever the folder, so those requests never rotate.
+    if (
+      configDirs.length < 2 ||
+      connection?.ANTHROPIC_API_KEY ||
+      connection?.ANTHROPIC_AUTH_TOKEN ||
+      connection?.CLAUDE_CODE_OAUTH_TOKEN
+    ) {
       return yield* input.sessions.run(request)
     }
     const own = request.sessionID ? yield* read(`accounts/${request.sessionID}`) : undefined

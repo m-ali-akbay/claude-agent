@@ -3,12 +3,16 @@ export * as ClaudeSessionHooks from "./session.js"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import { Effect, Schema } from "effect"
 import { RequestKind } from "../language-model/request-kind.js"
-import { ClaudeProvider } from "./provider.js"
+import { ClaudeInstance } from "./instance.js"
 
 // OpenCode records stopped tools (including a plain permission rejection) with this structured error.
 const isAborted = Schema.is(Schema.Struct({ error: Schema.Struct({ type: Schema.Literal("aborted") }) }))
 
-export const register = Effect.fn("ClaudeSessionHooks.register")(function* (ctx: Context) {
+export const register = Effect.fn("ClaudeSessionHooks.register")(function* (
+  ctx: Context,
+  instance: ClaudeInstance.Instance,
+) {
+  const KEY = ClaudeInstance.METADATA_KEY
   yield* ctx.session.hook(
     "model.request",
     (event) =>
@@ -18,7 +22,7 @@ export const register = Effect.fn("ClaudeSessionHooks.register")(function* (ctx:
         const session = yield* ctx.session.get({ sessionID: event.sessionID }).pipe(Effect.orDie)
         if (session.fork) event.headers[RequestKind.FORK_HEADER] = session.fork.sessionID
       }),
-    { providerID: ClaudeProvider.ID },
+    { providerID: instance.id },
   )
   yield* ctx.session.hook(
     "context",
@@ -32,16 +36,16 @@ export const register = Effect.fn("ClaudeSessionHooks.register")(function* (ctx:
           const content = message.content.map((part) => {
             if (part.type !== "tool-result" || part.result.type !== "error") return part
             const flags = {
-              ...part.providerMetadata?.[ClaudeProvider.ID],
+              ...part.providerMetadata?.[KEY],
               toolError: true,
               toolAborted: isAborted(part.result.value),
             }
-            return { ...part, providerMetadata: { ...part.providerMetadata, [ClaudeProvider.ID]: flags } }
+            return { ...part, providerMetadata: { ...part.providerMetadata, [KEY]: flags } }
           })
           return { ...message, content }
         })
       }),
-    { providerID: ClaudeProvider.ID },
+    { providerID: instance.id },
   )
   // Claude Code already retries API failures. Replaying the whole turn here also retries permanent billing errors.
   yield* ctx.session.hook(
@@ -50,6 +54,6 @@ export const register = Effect.fn("ClaudeSessionHooks.register")(function* (ctx:
       Effect.sync(() => {
         event.decision = { retry: false }
       }),
-    { providerID: ClaudeProvider.ID },
+    { providerID: instance.id },
   )
 })

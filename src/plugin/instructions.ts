@@ -4,7 +4,7 @@ import type { SystemPart } from "@opencode/ai/effect"
 import type { Context } from "@opencode/plugin/effect/plugin"
 import { Effect, Option, Schema } from "effect"
 import { ClaudeSystemPrompt } from "../language-model/system-prompt.js"
-import { ClaudeProvider } from "./provider.js"
+import type { ClaudeInstance } from "./instance.js"
 
 const KINDS = ["context", "generate", "compaction"] as const
 
@@ -17,7 +17,10 @@ const InstructionsMetadata = Schema.Struct({
 // Claude Code writes its own date and environment, so OpenCode's would repeat them.
 const SUPPLIED_BY_CLAUDE = new Set(["core/date", "core/environment"])
 
-export const register = Effect.fn("ClaudeInstructions.register")(function* (ctx: Context) {
+export const register = Effect.fn("ClaudeInstructions.register")(function* (
+  ctx: Context,
+  instance: ClaudeInstance.Instance,
+) {
   yield* Effect.forEach(
     KINDS,
     (kind) =>
@@ -30,7 +33,7 @@ export const register = Effect.fn("ClaudeInstructions.register")(function* (ctx:
             event.options[ClaudeSystemPrompt.AGENT_OPTION] = agent.data.system ?? ""
             event.options[ClaudeSystemPrompt.INSTRUCTIONS_OPTION] = instructions(event.system)
           }),
-        { providerID: ClaudeProvider.ID },
+        { providerID: instance.id },
       ),
     { discard: true },
   )

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode/plugin-claude-agent",
+  "name": "opencode-claude-multi",
   "version": "0.0.0",
   "private": true,
-  "description": "Experimental opencode plugin that runs Claude Code models through the Claude Agent SDK",
+  "description": "opencode provider plugin that runs several Claude Code accounts side by side, each with its own OAuth token (fork of claude-agent)",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

@@ -26,6 +26,8 @@ export class Model implements LanguageModelV3 {
     readonly dependencies: Dependencies,
     readonly connection: Readonly<Record<string, string>> = {},
     readonly fast = false,
+    // OpenCode keys a request's provider options by provider ID, which differs per account.
+    readonly optionKey = "claude-agent",
   ) {}
 
   async doGenerate(_options: LanguageModelV3CallOptions): Promise<never> {
@@ -42,7 +44,7 @@ export class Model implements LanguageModelV3 {
     const headers = options.headers ?? {}
     const kind = headers[RequestKind.HEADER]
     const session = headers[RequestKind.SESSION_HEADER]
-    const settings = options.providerOptions?.["claude-agent"]
+    const settings = options.providerOptions?.[this.optionKey] ?? options.providerOptions?.["claude-agent"]
     const role = settings?.[ClaudeSystemPrompt.AGENT_OPTION]
     const agent = typeof role === "string" ? role : undefined
     const loaded = settings?.[ClaudeSystemPrompt.INSTRUCTIONS_OPTION]

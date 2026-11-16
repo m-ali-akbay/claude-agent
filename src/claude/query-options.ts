@@ -39,6 +39,13 @@ export function connectionEnv(connection: {
   if (typeof settings.baseURL === "string") env.ANTHROPIC_BASE_URL = settings.baseURL
   if (typeof settings.apiKey === "string") env.ANTHROPIC_API_KEY = settings.apiKey
   if (typeof settings.authToken === "string") env.ANTHROPIC_AUTH_TOKEN = settings.authToken
+  // A Claude Code OAuth token (`claude setup-token`) logs in to a subscription without a config folder.
+  if (typeof settings.oauthToken === "string" && settings.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = settings.oauthToken
+  // A key saved through /connect arrives as apiKey. An OAuth token there is a subscription login, not an API key.
+  if (env.ANTHROPIC_API_KEY?.startsWith("sk-ant-oat")) {
+    env.CLAUDE_CODE_OAUTH_TOKEN ??= env.ANTHROPIC_API_KEY
+    delete env.ANTHROPIC_API_KEY
+  }
   if (typeof settings.headerTimeout === "number") env.API_TIMEOUT_MS = String(settings.headerTimeout)
   if (typeof settings.chunkTimeout === "number") env.CLAUDE_STREAM_IDLE_TIMEOUT_MS = String(settings.chunkTimeout)
   // ClaudeAccounts picks the folder for each request. The login check and model list use the first.
@@ -75,7 +82,7 @@ export function base(input: {
   return {
     pathToClaudeCodeExecutable: input.executable,
     spawnClaudeCodeProcess: input.io.spawn,
-    env: { ...input.io.env(), ...input.connection, ...ISOLATION_ENV },
+    env: processEnv(input.io.env(), input.connection),
     settingSources: [],
     settings: { disableAllHooks: true },
     // Without summaries, OpenCode has no reasoning text to display
@@ -87,6 +94,18 @@ export function base(input: {
     allowedTools: ["mcp__opencode__*"],
     verbatimPrompts: true,
   }
+}
+
+// An inherited API key or token outranks CLAUDE_CODE_OAUTH_TOKEN in Claude Code, so an account with its own OAuth token
+// drops them, along with any OAuth token from the shell that would otherwise apply to every account.
+function processEnv(inherited: Record<string, string | undefined>, connection?: Readonly<Record<string, string>>) {
+  const env: Record<string, string | undefined> = { ...inherited }
+  if (connection?.CLAUDE_CODE_OAUTH_TOKEN) {
+    delete env.ANTHROPIC_API_KEY
+    delete env.ANTHROPIC_AUTH_TOKEN
+    delete env.CLAUDE_CODE_OAUTH_TOKEN
+  }
+  return { ...env, ...connection, ...ISOLATION_ENV }
 }
 
 export async function session(input: {

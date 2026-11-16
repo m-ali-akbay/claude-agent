@@ -9,8 +9,9 @@ import type { ClaudeProbe } from "../claude/probe.js"
 import { ClaudeQueryOptions } from "../claude/query-options.js"
 import type { ClaudeStatus } from "../claude/status.js"
 import { SdkPlaceholder } from "../language-model/sdk-placeholder.js"
+import { ClaudeInstance } from "./instance.js"
 
-export const ID = Provider.ID.make("claude-agent")
+export const ID = Provider.ID.make(ClaudeInstance.DEFAULT_ID)
 
 // The model list we keep between starts, so opencode can list models without running `claude`
 const CatalogModel = Schema.Struct({
@@ -42,10 +43,13 @@ const PRICE_SOURCES: Partial<Record<NonNullable<AccountInfo["apiProvider"]>, Pro
 
 export const register = Effect.fn("ClaudeProvider.register")(function* (
   ctx: Context,
+  instance: ClaudeInstance.Instance,
   status: ClaudeStatus.Interface,
   io: ClaudeIO.Interface,
 ) {
-  const saved = Schema.decodeUnknownOption(Catalog)(yield* ctx.storage.get(CATALOG_KEY))
+  const ID = instance.id
+  const storage = ClaudeInstance.storage(ctx.storage, instance)
+  const saved = Schema.decodeUnknownOption(Catalog)(yield* storage.get(CATALOG_KEY))
   const current = { catalog: Option.getOrElse(saved, (): Catalog => ({ models: [] })) }
   // A chat's startup report lists models without measuring their context windows, so a model that is new to the
   // list falls back to the default limit until the full check measures it. A check that changes nothing ends the loop.
@@ -57,11 +61,12 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
     editor.add({
       info: {
         id: ID,
-        name: "Claude Agent",
-        activation: "auto",
+        name: instance.name,
+        // An account with its own token needs no /connect, so it is listed as soon as the plugin loads.
+        activation: instance.token() ? "enabled" : "auto",
         package: `aisdk:${SdkPlaceholder.url}`,
       },
-      models: current.catalog.models.map((model) => toModel(model, prices)),
+      models: current.catalog.models.map((model) => toModel(ID, model, prices)),
     })
   })
 
@@ -69,14 +74,14 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
     Stream.runForEach((state) =>
       Effect.gen(function* () {
         if (state.type !== "ready") return
-        const baseURL = (yield* connection(ctx)).ANTHROPIC_BASE_URL ?? io.env().ANTHROPIC_BASE_URL
+        const baseURL = (yield* connection(ctx, instance)).ANTHROPIC_BASE_URL ?? io.env().ANTHROPIC_BASE_URL
         const next = {
           priceSource: priceSource(state.probe.account, baseURL),
           models: fromClaude(state.probe.models, current.catalog.models),
         }
         if (JSON.stringify(next) === JSON.stringify(current.catalog)) return
         current.catalog = next
-        yield* ctx.storage.set(CATALOG_KEY, current.catalog)
+        yield* storage.set(CATALOG_KEY, current.catalog)
         yield* ctx.provider.reload()
         if (unmeasured(next.models)) yield* status.refresh().pipe(Effect.forkScoped)
       }),
@@ -86,16 +91,25 @@ export const register = Effect.fn("ClaudeProvider.register")(function* (
 
   // Without a saved list there is no model to pick, so the first message that would fill it can never be sent.
   const empty = current.catalog.models.length === 0
-  if ((empty || unmeasured(current.catalog.models)) && (yield* ctx.integration.connection.active(ID))) {
+  const usable = instance.token() !== undefined || (yield* ctx.integration.connection.active(ID)) !== undefined
+  if ((empty || unmeasured(current.catalog.models)) && usable) {
     yield* status.refresh().pipe(Effect.forkScoped)
   }
 })
 
-export const connection = Effect.fn("ClaudeProvider.connection")(function* (ctx: Context) {
-  const provider = yield* ctx.provider.get({ providerID: ID }).pipe(Effect.option)
-  if (Option.isNone(provider)) return {}
+// The instance's own token and folder, overridden by anything set for the provider in opencode.json.
+export const connection = Effect.fn("ClaudeProvider.connection")(function* (
+  ctx: Context,
+  instance: ClaudeInstance.Instance,
+) {
+  const own = ClaudeInstance.env(instance)
+  const provider = yield* ctx.provider.get({ providerID: instance.id }).pipe(Effect.option)
+  if (Option.isNone(provider)) return own
   const info = provider.value.data
-  return ClaudeQueryOptions.connectionEnv({ settings: info.settings, headers: info.headers, body: info.body })
+  return {
+    ...own,
+    ...ClaudeQueryOptions.connectionEnv({ settings: info.settings, headers: info.headers, body: info.body }),
+  }
 })
 
 // Context windows only come from the full check, so a chat's startup report keeps the saved ones.
@@ -125,7 +139,11 @@ function priceSource(account: AccountInfo, baseURL: string | undefined) {
   return PRICE_SOURCES[account.apiProvider]
 }
 
-function toModel(model: CatalogModel, prices: ReadonlyMap<string, Model.Info> | undefined): Model.Info {
+function toModel(
+  ID: Provider.ID,
+  model: CatalogModel,
+  prices: ReadonlyMap<string, Model.Info> | undefined,
+): Model.Info {
   const defaults = Model.Info.default(ID, Model.ID.make(model.id))
   // The 1M context version's price tiers are on the base model
   const id = (model.resolvedModel ?? model.id).replace(/\[1m\]$/, "")

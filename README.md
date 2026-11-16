@@ -1,125 +1,102 @@
-# Claude Agent plugin
+# opencode-claude-multi
 
-Experimental opencode plugin that runs a user's own Claude subscription inside opencode through Claude Code, using only documented features of the Claude Agent SDK.
+An opencode provider plugin that runs Claude models through Claude Code (the Claude Agent SDK), like the bundled
+`claude-agent` provider, but lets you add **the same provider several times, each with its own Claude Code OAuth
+token**. Every account shows up as its own provider (`claude-ali/opus`, `claude-work/sonnet`, …) with its own model
+list, its own `claude` processes and its own saved sessions.
 
-This is a fork of [Tarquinen/opencode-claude-agent](https://github.com/Tarquinen/opencode-claude-agent) with fast mode, account rotation, and a limit cooldown: an account that hits a usage limit is skipped until it resets, and requests fail at once instead of retrying when every account is at its limit.
-
-Not intended for release. See [PLAN.md](./PLAN.md) for the research, design and order of work, [TESTING.md](./TESTING.md) for how it is tested.
+It is a fork of [R44VC0RP/claude-agent](https://github.com/R44VC0RP/claude-agent) (the `upstream` remote). Everything
+upstream does (tools, sync, forks, fast mode, effort variants, `configDir` rotation) still works per account.
 
 ## Install
 
-Requires OpenCode 2.2.3 or newer.
+Requires OpenCode 2.2.3+ and Claude Code (`claude`) on `PATH`.
 
-1. Install Claude Code and sign in with `claude auth login` on the machine running OpenCode. An existing login is reused.
-2. Install the plugin:
-
-   ```sh
-   opencode plugin add github:R44VC0RP/claude-agent
-   ```
-
-
-3. To disable the bundled Claude Agent provider, add `"-opencode.provider.claude-agent"` to `plugins` in `opencode.json`. Keep `"github:R44VC0RP/claude-agent"` and your other plugin entries.
-4. In OpenCode, use `/connect` → **Claude Agent**, then `/models` to choose a model and effort level.
-
-To update, run `opencode plugin update github:R44VC0RP/claude-agent`. To uninstall, run `opencode plugin remove github:R44VC0RP/claude-agent`.
-
-### Example setup
-
-Plugin entries plus two rotating accounts, in the global `opencode.json`:
-
-```json
-{
-  "plugins": ["-opencode.provider.claude-agent", "github:R44VC0RP/claude-agent"],
-  "providers": {
-    "claude-agent": {
-      "settings": { "configDir": ["~/.claude", "~/.claude-2"] }
-    }
-  }
-}
-```
-
-## Use a second Claude account
-
-1. Sign in to the second account in a separate folder. Your usual login stays unchanged.
+1. Create a long-lived OAuth token for each account. Sign in to that account in the browser when asked:
 
    ```sh
-   CLAUDE_CONFIG_DIR="$HOME/.claude-2" claude auth login
+   claude setup-token
    ```
 
-2. Add Sonnet and Opus for the second account to your `opencode.json`:
+   Save each token (`sk-ant-oat01-…`) in its own file, readable only by you:
+
+   ```sh
+   mkdir -p ~/.config/opencode/claude-accounts && chmod 700 ~/.config/opencode/claude-accounts
+   pbpaste > ~/.config/opencode/claude-accounts/work && chmod 600 ~/.config/opencode/claude-accounts/work
+   ```
+
+2. Add the plugin to `~/.config/opencode/opencode.json` with one entry per account under `accounts`. The key is the
+   provider ID:
 
    ```json
    {
-     "providers": {
-       "claude-agent": {
-         "models": {
-           "sonnet-2": {
-             "modelID": "sonnet",
-             "name": "Sonnet (Claude 2)",
-             "settings": { "configDir": "~/.claude-2" }
-           },
-           "opus-2": {
-             "modelID": "opus",
-             "name": "Opus (Claude 2)",
-             "settings": { "configDir": "~/.claude-2" }
+     "plugins": [
+       "-opencode.provider.claude-agent",
+       {
+         "package": "/path/to/opencode-claude-multi",
+         "options": {
+           "accounts": {
+             "claude-home": { "name": "Claude · Home", "tokenFile": "~/.config/opencode/claude-accounts/home" },
+             "claude-work": { "name": "Claude · Work", "tokenFile": "~/.config/opencode/claude-accounts/work" }
            }
          }
        }
-     }
+     ]
    }
    ```
 
-3. In `/models`, choose **Sonnet (Claude 2)** or **Opus (Claude 2)** for the second account. The original entries still use your usual login.
+   `"-opencode.provider.claude-agent"` turns off the bundled single-account provider. It's optional.
 
-To use one account for every model in a project, such as a work account, set `configDir` for the provider in that project's `opencode.json` instead:
+3. Start OpenCode. Each account checks its login and fills its model list within a few seconds; then pick
+   `claude-home/opus`, `claude-work/sonnet`, … in `/models`. No `/connect` is needed for accounts with a token.
 
-```json
-{ "providers": { "claude-agent": { "settings": { "configDir": "~/.claude-work" } } } }
+## Add accounts from the UI
+
+No config editing needed: the plugin lists a **Claude Account** provider. Connect it (`/connect` → **Claude Account**,
+or the providers settings in the desktop app), choose **Claude Code OAuth token (claude setup-token)**, paste a token
+and give it a label. Every saved token becomes a provider of its own, named after its label: a token labelled
+`Şuheyda` is `claude-suheyda`, shown as **Claude · Şuheyda**. Add as many as you like; removing or relabelling a token
+updates the providers while OpenCode runs. A label already used by an `accounts` entry gets a short suffix.
+
+To hide the Claude Account provider, set `"connected": false` in the plugin's options.
+
+## Account options (opencode.json)
+
+| Option      | Meaning                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------- |
+| `name`      | Display name in `/models`. Default `Claude · <id>`.                                               |
+| `tokenFile` | File holding only the OAuth token. Re-read for each new model, so you can swap it without restart. |
+| `tokenEnv`  | Environment variable holding the token.                                                           |
+| `token`     | The token inline. Avoid: it puts a secret in `opencode.json`.                                     |
+| `configDir` | A Claude Code config folder (`CLAUDE_CONFIG_DIR`). Without a token, its `claude auth login` is used. |
+
+Per-provider settings in `providers.<id>` still apply on top (for example `settings.fast`, `settings.baseURL`, custom
+model entries), and `settings.oauthToken` there overrides the account's token.
+
+Without `accounts`, the plugin registers a single `claude-agent` provider and behaves exactly like upstream.
+
+## How it works
+
+- Each account is a separate opencode provider, registered by one plugin instance. Accounts from `accounts` also get
+  an integration of their own; accounts from the UI are the credentials of the single `claude-account` integration.
+- Requests run `claude` with `CLAUDE_CODE_OAUTH_TOKEN` set to the account's token. `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` inherited from the shell are dropped for those processes, because
+  Claude Code would otherwise prefer them over the account's token.
+- Model catalogs, Claude session records and rate-limit state are stored per account (storage keys prefixed with the
+  provider ID).
+- Message metadata still uses the `claude-agent` key, so a chat moved between accounts reads its earlier tool results.
+
+## Develop
+
+```sh
+bun install
+bun run typecheck
+bun test test/opencode test/claude test/sync test/tools test/language-model
 ```
 
-## Rotate between accounts
+`test/opencode/accounts.test.ts` covers both kinds of accounts with a fake `claude`. `test/live/ui-account.live.ts`
+checks the UI flow against the real `claude` with an isolated database:
 
-If you have several interchangeable accounts, OpenCode can move chats between them as they hit usage limits.
-
-1. Sign in to each account in its own folder:
-
-   ```sh
-   CLAUDE_CONFIG_DIR="$HOME/.claude-1" claude auth login
-   CLAUDE_CONFIG_DIR="$HOME/.claude-2" claude auth login
-   ```
-
-2. List the folders as `configDir` in your `opencode.json`:
-
-   ```json
-   {
-     "providers": {
-       "claude-agent": {
-         "settings": { "configDir": ["~/.claude-1", "~/.claude-2"] }
-       }
-     }
-   }
-   ```
-
-An account that hits a limit is skipped until the limit resets, so new chats and subagents don't start Claude on it again. A weekly Opus or Sonnet limit only skips that account for that model family. When every account is at its limit, requests fail at once with the earliest reset time instead of retrying.
-
-## Use fast mode
-
-The Agent SDK keeps fast mode off unless it is opted in. Add an Opus entry with `fast` to your `opencode.json`:
-
-```json
-{
-  "providers": {
-    "claude-agent": {
-      "models": {
-        "opus-fast": {
-          "modelID": "opus",
-          "name": "Opus (fast)",
-          "settings": { "fast": true }
-        }
-      }
-    }
-  }
-}
+```sh
+CLAUDE_TOKEN_FILE=~/.config/opencode/claude-accounts/work bun test/live/ui-account.live.ts "$(mktemp -d)"
 ```
-
-Fast mode only works on Opus models and bills as extra usage on a subscription. Combine it with `configDir` to use it on a second account.
