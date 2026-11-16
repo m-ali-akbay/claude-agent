@@ -17,6 +17,18 @@ import type { ClaudeInstance } from "./instance.js"
 export const HUB_ID = "claude-account"
 export const HUB_NAME = "Claude Account"
 export const METHOD_LABEL = "Claude Code OAuth token (claude setup-token)"
+export const NAME_FIELD = "name"
+
+// opencode labels a credential saved without a label after its integration: "Claude Account", "Claude Account 2", …
+const DEFAULT_LABEL = new RegExp(`^${HUB_NAME}( \\d+)?$`)
+
+/** A label the user chose (connect with a label, or rename) wins; otherwise the name from the token form. */
+export function accountName(label: string, answered: unknown) {
+  const own = label.trim()
+  if (own && !DEFAULT_LABEL.test(own)) return own
+  if (typeof answered === "string" && answered.trim()) return answered.trim()
+  return own
+}
 
 export interface Running {
   readonly credentialID: string
@@ -54,7 +66,27 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
     editor.update(HUB_ID, (integration) => {
       integration.name = HUB_NAME
     })
-    editor.method.update({ integrationID: HUB_ID, method: { type: "key", label: METHOD_LABEL } })
+    editor.method.update({
+      integrationID: HUB_ID,
+      method: {
+        type: "key",
+        label: METHOD_LABEL,
+        // opencode keeps the answer in the credential's metadata and labels the credential "Claude Account N",
+        // so the account is named from this field until the credential is renamed.
+        form: [
+          {
+            key: NAME_FIELD,
+            type: "string",
+            title: "Account name",
+            description: "Shown as Claude · <name>; the provider ID is claude-<name>",
+            placeholder: "Work",
+            required: true,
+            minLength: 1,
+            maxLength: 40,
+          },
+        ],
+      },
+    })
   })
 
   const parent = yield* Effect.scope
@@ -77,10 +109,9 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
     const seen = new Set<string>()
     for (const connection of credentials) {
       seen.add(connection.id)
-      const value = yield* ctx.integration.connection.resolve(connection).pipe(
-        Effect.map((value) => (value?.type === "key" ? value.key.trim() : undefined)),
-        Effect.orElseSucceed(() => undefined),
-      )
+      const resolved = yield* ctx.integration.connection.resolve(connection).pipe(Effect.orElseSucceed(() => undefined))
+      const value = resolved?.type === "key" ? resolved.key.trim() : undefined
+      const label = accountName(connection.label, resolved?.metadata?.[NAME_FIELD])
       const current = running.get(connection.id)
       if (!value) {
         if (current) {
@@ -89,7 +120,7 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
         }
         continue
       }
-      if (current && current.label === connection.label) {
+      if (current && current.label === label) {
         // The token is read for each new model, so a changed token applies without a restart.
         current.holder.token = value
         continue
@@ -99,16 +130,16 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
         changed = true
       }
       const taken = new Set([...input.reserved, ...[...running.values()].map((entry) => String(entry.instance.id))])
-      const id = providerID(connection.label, connection.id, taken)
+      const id = providerID(label, connection.id, taken)
       const holder = { token: value }
       const entry: Running = {
         credentialID: connection.id,
-        label: connection.label,
+        label,
         holder,
         scope: yield* Scope.fork(parent),
         instance: {
           id: Provider.ID.make(id),
-          name: `Claude · ${connection.label || id.replace(/^claude-/, "")}`,
+          name: `Claude · ${label || id.replace(/^claude-/, "")}`,
           token: () => holder.token,
           storagePrefix: `${id}/`,
           source: "connected",
@@ -158,13 +189,15 @@ const TURKISH: Record<string, string> = {
 }
 
 export function slug(label: string) {
-  return label
+  const result = label
     .replace(/[ıİşŞğĞçÇöÖüÜ]/g, (char) => TURKISH[char] ?? char)
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
+  // "Claude Work" would otherwise become claude-claude-work
+  return result.replace(/^claude-(?=.)/, "")
 }
 
 export function providerID(label: string, credentialID: string, taken: ReadonlySet<string>) {

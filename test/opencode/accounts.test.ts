@@ -100,19 +100,23 @@ describe("Claude accounts added from the UI", () => {
       const integrations = yield* test.opencode.integration.list()
       const hub = integrations.data.find((i) => String(i.id) === "claude-account")
       expect(hub?.name).toBe("Claude Account")
-      expect(hub?.methods.some((m) => m.type === "key")).toBe(true)
+      const method = hub?.methods.find((m) => m.type === "key")
+      expect(method?.form?.map((field) => field.key)).toEqual(["name"])
       // With no token saved, Claude Account is a provider to connect, not a connected one.
       expect((yield* providers()).map(([id]) => id)).not.toContain("claude-account")
 
       yield* test.opencode.integration.connect.key({
         integrationID: Integration.ID.make("claude-account"),
         key: "sk-ant-oat01-ui-one",
-        label: "Şuheyda",
+        // The connect dialog asks for the name in the token form and saves no label
+        answer: { name: "Şuheyda" },
       })
       yield* test.opencode.integration.connect.key({
         integrationID: Integration.ID.make("claude-account"),
         key: "sk-ant-oat01-ui-two",
-        label: "Work",
+        // A label chosen on connect wins over the form's name
+        answer: { name: "ignored" },
+        label: "Claude Work",
       })
       yield* TestOpenCode.waitUntil(
         Effect.all([providerModels(test.opencode, "claude-suheyda"), providerModels(test.opencode, "claude-work")]),
@@ -120,6 +124,7 @@ describe("Claude accounts added from the UI", () => {
         "30 seconds",
       )
       expect(yield* providers()).toContainEqual(["claude-suheyda", "Claude · Şuheyda"])
+      expect(yield* providers()).toContainEqual(["claude-work", "Claude · Claude Work"])
 
       const before = claude.runs.length
       const result = yield* test.opencode.generate.text({
@@ -132,10 +137,20 @@ describe("Claude accounts added from the UI", () => {
       expect(chat.ANTHROPIC_API_KEY).toBeUndefined()
 
       const credentials = yield* test.opencode.credential.list()
-      const work = credentials.find((c) => c.label === "Work")!
+      // Renaming the account in the UI renames its provider
+      const one = credentials.find((c) => c.label === "Claude Account")!
+      yield* test.opencode.credential.update({ credentialID: one.id, label: "Personal" })
+      yield* TestOpenCode.waitUntil(
+        Effect.all([providers(), providerModels(test.opencode, "claude-personal")]),
+        ([list, models]) => !list.some(([id]) => id === "claude-suheyda") && models.includes("haiku"),
+        "30 seconds",
+      )
+      expect(yield* providers()).toContainEqual(["claude-personal", "Claude · Personal"])
+
+      const work = credentials.find((c) => c.label === "Claude Work")!
       yield* test.opencode.credential.remove({ credentialID: work.id })
       yield* TestOpenCode.waitUntil(providers(), (list) => !list.some(([id]) => id === "claude-work"), "10 seconds")
-      expect((yield* providers()).map(([id]) => id)).toContain("claude-suheyda")
+      expect((yield* providers()).map(([id]) => id)).toContain("claude-personal")
       claude.check()
     }),
   )

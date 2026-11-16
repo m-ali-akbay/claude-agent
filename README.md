@@ -53,10 +53,15 @@ Requires OpenCode 2.2.3+ and Claude Code (`claude`) on `PATH`.
 ## Add accounts from the UI
 
 No config editing needed: the plugin lists a **Claude Account** provider. Connect it (`/connect` → **Claude Account**,
-or the providers settings in the desktop app), choose **Claude Code OAuth token (claude setup-token)**, paste a token
-and give it a label. Every saved token becomes a provider of its own, named after its label: a token labelled
-`Şuheyda` is `claude-suheyda`, shown as **Claude · Şuheyda**. Add as many as you like; removing or relabelling a token
-updates the providers while OpenCode runs. A label already used by an `accounts` entry gets a short suffix.
+or the providers settings in the desktop app), choose **Claude Code OAuth token (claude setup-token)**, enter an
+**Account name** and paste the token. Every saved token becomes a provider of its own, named after the account: the name
+`Şuheyda` gives `claude-suheyda`, shown as **Claude · Şuheyda** (a leading "Claude" is dropped from the ID, so
+`Claude Work` is `claude-work`). Add as many as you like.
+
+To rename an account later, rename its credential in OpenCode (in the TUI: `/connect` → **Claude Account** → select the
+token → **rename**). The provider follows the new name while OpenCode runs; removing the token removes the provider.
+Chats started under the old name keep their history, but a new model pick is needed since the provider ID changed.
+A name already used by an `accounts` entry gets a short suffix.
 
 To hide the Claude Account provider, set `"connected": false` in the plugin's options.
 
