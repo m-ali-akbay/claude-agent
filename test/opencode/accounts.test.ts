@@ -101,6 +101,8 @@ describe("Claude accounts added from the UI", () => {
       const hub = integrations.data.find((i) => String(i.id) === "claude-account")
       expect(hub?.name).toBe("Claude Account")
       expect(hub?.methods.some((m) => m.type === "key")).toBe(true)
+      // With no token saved, Claude Account is a provider to connect, not a connected one.
+      expect((yield* providers()).map(([id]) => id)).not.toContain("claude-account")
 
       yield* test.opencode.integration.connect.key({
         integrationID: Integration.ID.make("claude-account"),

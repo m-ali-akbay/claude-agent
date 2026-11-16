@@ -37,13 +37,14 @@ export const register = Effect.fn("ClaudeConnected.register")(function* (input: 
   const { ctx } = input
   const integrationID = Integration.ID.make(HUB_ID)
 
-  // A provider is what gives an integration its place in the UI. It has no models of its own.
+  // A provider is what gives an integration its place in the UI. It has no models of its own, and "auto" lists it as
+  // connected only once a token is saved, so before that it shows among the providers to connect.
   yield* ctx.provider.transform((editor) => {
     editor.add({
       info: {
         id: Provider.ID.make(HUB_ID),
         name: HUB_NAME,
-        activation: "enabled",
+        activation: "auto",
         package: `aisdk:${SdkPlaceholder.url}`,
       },
       models: [],
